@@ -1,13 +1,19 @@
 """
 Triple Pendulum Cart Simulation
-
 Author: Chachay 
 """
 import Box2D as b2
 import numpy as np
+
+import sympy as sp
+from sympy.physics import mechanics
+
 import wx
 
 FPS = 50
+
+
+# [Deriving the Chebyshev Polynomials using Sum of Squares optimization with Sympy and Cvxpy - Hey There Buddo!](http://www.philipzucker.com/deriving-the-chebyshev-polynomials-using-sum-of-squares-optimization-with-sympy-and-cvxpy/)
 
 class TriplePendulumCartBox2D(object):
     def __init__(self):
@@ -78,7 +84,6 @@ class TriplePendulumCartBox2D(object):
 
 class SwingUpController(object):
     def __init__(self):
-        super(SwingUpController, self).__init__()
         self.u_prev = 0.0
 
     def IntegratedController(self, y_prev):
@@ -94,7 +99,61 @@ class SwingUpController(object):
         return u
 
     def TrajectoryGenerator(self):
-        pass
+
+        # gravity and time symbols
+        g, t = sp.symbols('g,t') 
+
+        # Generalized coordinates and velocities
+        ## q[0]: Cart coordinate
+        ## q[1-3]: Pendulum Angles
+        q = mechanics.dynamicsymbols('q:{0}'.format(4))
+        qd = mechanics.dynamicsymbols('qd:{0}'.format(4))
+
+        # Cart Force Input
+        u = mechanics.dynamicsymbols('u')
+
+        # mass and length
+        ## l0 will not be used
+        m = sp.symbols('m:{0}'.format(4))
+        l = sp.symbols('l:{0}'.format(4))
+
+        # Create pivot point reference frame
+        A = mechanics.ReferenceFrame('A')
+        P = mechanics.Point('P')
+        P.set_vel(A, qd[0] * A.x)
+
+        # lists to hold particles, forces, and kinetic ODEs
+        # for each pendulum in the chain
+        particles = []
+        forces = []
+        kinetic_odes = []
+
+        forces.append((P, u * A.x))
+        kinetic_odes.append(q[0].diff(t) - qd[0])
+
+        for i in range(1, 4):
+            # Create a reference frame following the i^th mass
+            Ai = A.orientnew('A' + str(i), 'Axis', [q[i], A.z])
+            Ai.set_ang_vel(A, qd[i] * A.z)
+
+            # Create a point in this reference frame
+            Pi = P.locatenew('P' + str(i), l[i] * Ai.x)
+            Pi.v2pt_theory(P, A, Ai)
+
+            # Create a new particle of mass m[i] at this point
+            Pai = mechanics.Particle('Pa' + str(i), Pi, m[i])
+            particles.append(Pai)
+
+            # Set forces & compute kinematic ODE
+            forces.append((Pi, m[i] * g * A.x))
+            kinetic_odes.append(q[i].diff(t) - qd[i])
+
+            P = Pi
+
+        # Generate equations of motion
+        KM = mechanics.KanesMethod(A, q_ind=q, u_ind=qd, kd_eqs=kinetic_odes)
+        fr, fr_star = KM.kanes_equations(forces, particles)
+        
 
     def FeedbackController(self, x_diff):
         pass
@@ -114,7 +173,7 @@ class APPWINDOW(wx.Frame):
     PixelPerMeter = 20.0  # pixels per meter
 
     def __init__(self, parent=None, id=-1, title=None):
-        super(APPWINDOW, self).__init__(parent, id, title)
+        super().__init__(parent, id, title)
         self.SetSize(self.W, self.H)
         self.timer = wx.Timer(self)
 
